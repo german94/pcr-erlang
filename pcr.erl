@@ -1,7 +1,3 @@
-% TODO:
-%     -registrar procesos en vez de usar pids
-%     -cuando se envia un mensaje a un nodo del PCR, esperar confirmacion de que se recibio y manejar reintentos con timeouts
-
 -module(pcr).
 -export([start_pcr/2, output_loop/1, production_loop/3, reduce_loop/5, consume/2, produce/2, pcr_sequential_composition/3]).
 -record(reducer, {function, initial_val}).
