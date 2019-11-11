@@ -149,6 +149,8 @@ generate_uuid() ->
 send_input_to_pcr(PcrPid, Input) ->
     PcrPid ! {input, Input}.
 
+
+%Functions to generate PCRs for testing
 even_lambda() ->
     fun(X) ->
         if
