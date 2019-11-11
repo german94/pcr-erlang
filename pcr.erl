@@ -1,5 +1,7 @@
 -module(pcr).
--export([start_pcr/2, output_loop/1, production_loop/3, reduce_loop/5, consume/2, produce/2, pcr_sequential_composition/3]).
+-export([start_pcr/2]).
+-export([output_loop/1, production_loop/3, reduce_loop/5, consume/2, produce/2, pcr_sequential_composition/3, send_input_to_pcr/2, produce_new_set_of_values/3, produce_new_value/3]).
+-export([generate_fib_even_counter_pcr/0]).
 -record(reducer, {function, initial_val}).
 -record(pcr, {producer, consumers, reducer}).
 
@@ -29,21 +31,20 @@ start_pcr(Pcr, ExternalListenerPids) ->
     OutputLoopPid = spawn(pcr, output_loop, [ExternalListenerPids]),
     spawn(pcr, production_loop, [Pcr, OutputLoopPid, ExternalListenerPids]).
 
-%Starts producer, consumers and reducers for each new input
+%Listens for new PCR inputs and for each one it signals the OutputLoop process to wait for the new output,
+%spawns the reducer and produces the new set of values corresponding to the input
 production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
     receive
         {input, Input} ->
             Token = generate_uuid(),
             OutputLoopPid ! {new_item, Token},
-            Consumers = get_consumers(Pcr),
-            ReducerPid = spawn_reducer(Pcr, length(Consumers), OutputLoopPid, Token),
-            ConsumerPids = spawn_consumers(Pcr, ReducerPid),
-            ProducerPid = spawn_producer(Pcr, ConsumerPids),
-            produce_new_item(ProducerPid, Input),
             erlang:display({new_input, Input, Token}),
+            NumberOfElementsToReduce = length(get_consumers(Pcr)) * (Input + 1),
+            ReducerPid = spawn_reducer(Pcr, NumberOfElementsToReduce, OutputLoopPid, Token),
+            produce_new_set_of_values(Pcr, Input, ReducerPid),
             production_loop(Pcr, OutputLoopPid, ExternalListenerPids);
         stop ->
-            OutputLoopPid ! stop        %here we should kill all the other PCR processes: they should be linked to this one
+            OutputLoopPid ! stop        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
     end.
 
 %Spawns the reduce loop for a particular input (identified by the token token) and returns the PID
@@ -75,17 +76,23 @@ spawn_pcr_node(Node, BasicFunctionApplier, ExternalListenerPids) ->
             start_pcr(Node, ExternalListenerPids)
     end.
 
-%Sends the produce message with the corresponding input to the producer process.
-%Producer processes, like consumer ones, process one input in their entire lifecycle so it also sends the stop signal.
-produce_new_item(ProducerPid, Input) ->
+%Spawns both producer and consumers and sends the producer the signal to generate the new value
+produce_new_value(Pcr, Input, ReducerPid) ->
+    ConsumerPids = spawn_consumers(Pcr, ReducerPid),
+    ProducerPid = spawn_producer(Pcr, ConsumerPids),
     ProducerPid ! {input, Input},
     ProducerPid ! stop.
+
+%Iterates the produce function producing the values concurrently
+produce_new_set_of_values(Pcr, Input, ReducerPid) ->
+    lists:foreach(fun(Index) -> produce_new_value(Pcr, Index, ReducerPid) end, lists:seq(0, Input)).
 
 %Applies the produce function and sends the output to all the consumers
 produce(ProduceFun, ConsumerPids) ->
     receive
         {input, Input} ->
             ProducedItem = ProduceFun(Input),
+            erlang:display({new_produced_value, ProducedItem}),
             lists:foreach(
                 fun(CPid) -> CPid ! {input, ProducedItem}, CPid ! stop end,
                 ConsumerPids)
@@ -137,3 +144,28 @@ wait_for_output(Token) ->
 %Generates a new token with a length of 20 characters
 generate_uuid() ->
     base64:encode(crypto:strong_rand_bytes(20)).
+
+%Encapsulates the message that is sent to the PCR with the input
+send_input_to_pcr(PcrPid, Input) ->
+    PcrPid ! {input, Input}.
+
+even_lambda() ->
+    fun(X) ->
+        if
+            X rem 2 == 0 -> 1;
+            true -> 0
+        end
+    end.
+
+fib_lambda() ->
+    fun F(0) -> 0; F(1) -> 1; F(X) -> F(X - 1) + F(X - 2) end.
+
+sum_lambda() ->
+    fun(X, Y) -> X + Y end.
+
+identity_lambda() ->
+    fun(X) -> X end.
+
+generate_fib_even_counter_pcr() ->
+    Reducer = #reducer{function=sum_lambda(), initial_val=0},
+    #pcr{producer=fib_lambda(), consumers=[even_lambda()], reducer=Reducer}.
