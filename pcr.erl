@@ -2,7 +2,9 @@
 -export([start_pcr/2]).
 -export([output_loop/1, production_loop/3, reduce_loop/5, consume/2, produce/2, pcr_sequential_composition/3, send_input_to_pcr/2, produce_new_set_of_values/3, produce_new_value/3]).
 -export([generate_fib_even_counter_pcr/0]).
--record(reducer, {function, initial_val}).
+-record(consumer, {id, sources, node_logic}).
+-record(producer, {id, node_logic}).
+-record(reducer, {id, sources, function, initial_val}).
 -record(pcr, {producer, consumers, reducer}).
 
 %PCR record getters
@@ -12,11 +14,46 @@ get_reducer_fun(Pcr) ->
 get_reducer_initial_value(Pcr) ->
     Pcr#pcr.reducer#reducer.initial_val.
 
+get_reducer_sources(Node) ->
+    if
+        is_record(Node, reducer) -> Node#reducer.sources;
+        true -> get_reducer_sources(get_reducer(Node))
+    end.
+
+get_reducer_id(Node) ->
+    if
+        is_record(Node, reducer) -> Node#reducer.id;
+        true -> get_reducer_id(get_reducer(Node))
+    end.
+
+get_consumer_sources(Consumer) ->
+    Consumer#consumer.sources.
+
 get_consumers(Pcr) ->
     Pcr#pcr.consumers.
 
 get_producer(Pcr) ->
     Pcr#pcr.producer.
+
+get_consumer_id(Consumer) ->
+    Consumer#consumer.id.
+
+get_producer_id(Node) ->
+    if
+        is_record(Node, producer) -> Node#producer.id;
+        true -> get_producer_id(get_producer(Node))
+    end.
+
+get_consumers_of(Id, Pcr) ->
+    [Consumer || Consumer <- get_consumers(Pcr), lists:member(Id, get_consumer_sources(Consumer))].
+
+get_listeners_of(Id, Pcr) ->
+    ConsumersListeners = get_consumers_of(Id, Pcr),
+    Reducer = get_reducer(Pcr),
+    if 
+        lists:member(Id, get_reducer_sources(Reducer)) -> [Reducer | ConsumersListeners];
+        true -> ConsumersListeners
+    end.
 
 %External inputs get into Pcr1, then Pcr1 output becomes the input for PCR2
 %and finally the output of the whole composition is the output of Pcr2
