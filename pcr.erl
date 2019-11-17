@@ -1,24 +1,16 @@
 -module(pcr).
 -export([start_pcr/2]).
--export([output_loop/1, production_loop/3, reduce_loop/5, consume/2, produce/2, pcr_sequential_composition/3, send_input_to_pcr/2, produce_new_set_of_values/3, produce_new_value/3]).
+-export([output_loop/1, production_loop/3, reduce_loop/7, consume/4, consume_setup/2, pcr_sequential_composition/3, send_input_to_pcr/2, produce_new_set_of_values/3, produce_new_value/3]).
 -export([generate_fib_even_counter_pcr/0]).
 -record(consumer, {id, sources, node_logic}).
 -record(producer, {id, node_logic}).
--record(reducer, {id, sources, function, initial_val}).
+-record(reducer, {id, sources, node_logic, initial_val}).
 -record(pcr, {producer, consumers, reducer}).
+-record(active_node, {id, pid}).
 
 %PCR record getters
-get_reducer_fun(Pcr) ->
-    Pcr#pcr.reducer#reducer.function.
-
 get_reducer_initial_value(Pcr) ->
     Pcr#pcr.reducer#reducer.initial_val.
-
-get_reducer_sources(Node) ->
-    if
-        is_record(Node, reducer) -> Node#reducer.sources;
-        true -> get_reducer_sources(get_reducer(Node))
-    end.
 
 get_reducer_id(Node) ->
     if
@@ -26,34 +18,51 @@ get_reducer_id(Node) ->
         true -> get_reducer_id(get_reducer(Node))
     end.
 
-get_consumer_sources(Consumer) ->
-    Consumer#consumer.sources.
-
 get_consumers(Pcr) ->
     Pcr#pcr.consumers.
 
 get_producer(Pcr) ->
     Pcr#pcr.producer.
 
-get_consumer_id(Consumer) ->
-    Consumer#consumer.id.
-
-get_producer_id(Node) ->
-    if
-        is_record(Node, producer) -> Node#producer.id;
-        true -> get_producer_id(get_producer(Node))
-    end.
+get_reducer(Pcr) ->
+    Pcr#pcr.reducer.
 
 get_consumers_of(Id, Pcr) ->
-    [Consumer || Consumer <- get_consumers(Pcr), lists:member(Id, get_consumer_sources(Consumer))].
+    [Consumer || Consumer <- get_consumers(Pcr), lists:member(Id, get_sources(Consumer))].
 
-get_listeners_of(Id, Pcr) ->
+get_listeners_of_id(Id, Pcr) ->
     ConsumersListeners = get_consumers_of(Id, Pcr),
     Reducer = get_reducer(Pcr),
-    if 
-        lists:member(Id, get_reducer_sources(Reducer)) -> [Reducer | ConsumersListeners];
-        true -> ConsumersListeners
+    case lists:member(Id, get_sources(Reducer)) of
+        true -> [Reducer | ConsumersListeners];
+        false -> ConsumersListeners
     end.
+
+get_id(Component) when element(1, Component) == consumer -> Component#consumer.id;
+get_id(Component) when element(1, Component) == producer -> Component#producer.id;
+get_id(Component) when element(1, Component) == reducer -> Component#reducer.id.
+
+get_sources(Component) when element(1, Component) == consumer -> Component#consumer.sources;
+get_sources(Component) when element(1, Component) == reducer -> Component#reducer.sources.
+
+get_fun(Component) when element(1, Component) == consumer -> Component#consumer.node_logic;
+get_fun(Component) when element(1, Component) == producer -> Component#producer.node_logic;
+get_fun(Component) when element(1, Component) == reducer -> Component#reducer.node_logic.
+
+apply_fun(Fun, [], Inputs) ->
+    apply(Fun, Inputs);
+apply_fun(Fun, [Source|Sources], Inputs) ->
+    InputOfSource = element(2, lists:keyfind(Source, 1, Inputs)),
+    apply_fun(Fun, Sources, [InputOfSource|lists:keydelete(Source, 1, Inputs)]).
+
+create_node(Id, Pid) ->
+    #active_node{id=Id, pid=Pid}.
+
+get_node_id(Node) ->
+    Node#active_node.id.
+
+get_node_pid(Node) ->
+    Node#active_node.pid.
 
 %External inputs get into Pcr1, then Pcr1 output becomes the input for PCR2
 %and finally the output of the whole composition is the output of Pcr2
@@ -73,35 +82,46 @@ start_pcr(Pcr, ExternalListenerPids) ->
 production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
     receive
         {input, Input} ->
-            Token = generate_uuid(),
-            OutputLoopPid ! {new_item, Token},
+            Token = generate_uuid(),        %this token is used to match PCR inputs with PCR outputs
+            notify_new_item(OutputLoopPid, Token),
             erlang:display({new_input, Input, Token}),
-            NumberOfElementsToReduce = length(get_consumers(Pcr)) * (Input + 1),
-            ReducerPid = spawn_reducer(Pcr, NumberOfElementsToReduce, OutputLoopPid, Token),
+            ReducerPid = spawn_reducer(Pcr, Input + 1, OutputLoopPid, Token),
             produce_new_set_of_values(Pcr, Input, ReducerPid),
             production_loop(Pcr, OutputLoopPid, ExternalListenerPids);
         stop ->
-            OutputLoopPid ! stop        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
+            stop(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
     end.
 
-%Spawns the reduce loop for a particular input (identified by the token token) and returns the PID
+stop(OutputLoopPid) ->
+    OutputLoopPid ! stop.
+
+notify_new_item(OutputLoopPid, Token) ->
+    OutputLoopPid ! {new_item, Token}.
+
+%Spawns the reduce loop for a particular external input (identified by the token) and returns the PID
 spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
     spawn(
         pcr,
         reduce_loop, 
-        [get_reducer_fun(Pcr), get_reducer_initial_value(Pcr), NumberOfItemsToReduce, OutputLoopPid, Token]).
+        [
+            get_reducer(Pcr), 
+            get_reducer_initial_value(Pcr),
+            NumberOfItemsToReduce,
+            length(get_sources(Pcr)),
+            OutputLoopPid,
+            Token,
+            maps:empty()
+        ]).
 
-%Spawns the list of consumers and returns the PIDs
-spawn_consumers(Pcr, ReducerPid) ->
-    lists:map(fun(Consumer) -> spawn_consumer(Consumer, ReducerPid) end, get_consumers(Pcr)).
+%Spawns all the pcr nodes but the producer one
+spawn_pcr(Pcr, ReducerPid, InternalToken) ->
+    Consumers = [create_node(Consumer#consumer.id, spawn_consumer(Consumer, InternalToken)) || Consumer <- get_consumers(Pcr)],
+    Reducer = create_node(get_reducer_id(Pcr), ReducerPid),
+    [Reducer | Consumers].
 
 %Spawns a particular consumer and returns the PID
-spawn_consumer(Consumer, ReducerPid) ->
-    spawn_pcr_node(Consumer, consume, ReducerPid).
-
-%Spawns the PCR producer and returns the PID
-spawn_producer(Pcr, ConsumerPids) ->
-    spawn_pcr_node(get_producer(Pcr), produce, ConsumerPids).
+spawn_consumer(Consumer, InternalToken) ->    %consumer_logic should work for both consumer and producer records
+    spawn(pcr, consume_setup, [Consumer, InternalToken]).     %CAREFUL! the consumer logic can be a nested PCR!!!!!!
 
 %Spawn a PCR node, it could be a nested PCR or a basic function (only producers and consumers are supported)
 %Returns the PID of the new node
@@ -113,10 +133,30 @@ spawn_pcr_node(Node, BasicFunctionApplier, ExternalListenerPids) ->
             start_pcr(Node, ExternalListenerPids)
     end.
 
+get_producer_listeners(Pcr, Listeners) ->
+    [Listener || Listener <- Listeners, lists:is_member(get_producer_id(Pcr), get_listeners_of_id(get_node_id(Listener), Pcr))].
+
+send_message_to_node(Message, Node) ->
+    get_node_pid(Node) ! Message.
+
+broadcast_to_nodes(Message, Nodes) ->
+    lists:foreach(fun(Node) -> send_message_to_node(Message, Node) end, Nodes).
+
+send_receivers_data_to_nodes(Pcr, Listeners) ->
+    lists:foreach(
+        fun(Listener) -> send_message_to_node({listener_pids, get_listeners_of_id(get_node_id(Listener), Pcr)}, Listener) end,
+        Listeners).
+
 %Spawns both producer and consumers and sends the producer the signal to generate the new value
 produce_new_value(Pcr, Input, ReducerPid) ->
-    ConsumerPids = spawn_consumers(Pcr, ReducerPid),
-    ProducerPid = spawn_producer(Pcr, ConsumerPids),
+    InternalToken = generate_uuid(),     %this token is used to identify produced items associated to a single PCR external input
+    Listeners = spawn_pcr(Pcr, ReducerPid, InternalToken), 
+    send_receivers_data_to_nodes(Pcr, Listeners),  %sends a {listeners_pids, Listeners} message to each node so everyone knows who to send the output
+    start_producer(Pcr, Listeners, Input, InternalToken).
+
+start_producer(Pcr, Listeners, Input, InternalToken) ->
+    ProducerPid = spawn_consumer(get_producer(Pcr), InternalToken),
+    ProducerPid ! {listeners_pids, get_producer_listeners(Pcr, Listeners)},
     ProducerPid ! {input, Input},
     ProducerPid ! stop.
 
@@ -124,36 +164,42 @@ produce_new_value(Pcr, Input, ReducerPid) ->
 produce_new_set_of_values(Pcr, Input, ReducerPid) ->
     lists:foreach(fun(Index) -> produce_new_value(Pcr, Index, ReducerPid) end, lists:seq(0, Input)).
 
-%Applies the produce function and sends the output to all the consumers
-produce(ProduceFun, ConsumerPids) ->
-    receive
-        {input, Input} ->
-            ProducedItem = ProduceFun(Input),
-            erlang:display({new_produced_value, ProducedItem}),
-            lists:foreach(
-                fun(CPid) -> CPid ! {input, ProducedItem}, CPid ! stop end,
-                ConsumerPids)
+%Applies the consume function and sends the output to the producer
+consume(Consumer, Listeners, Inputs, InternalToken) ->
+    case length(Inputs) == get_sources(Consumer) of
+        true ->
+            ConsumerOutput = apply_fun(get_fun(Consumer), get_sources(Consumer), Inputs),
+            broadcast_to_nodes([{output, get_id(Consumer), ConsumerOutput, InternalToken}], Listeners);
+        false -> 
+            receive
+                {output, Id, Input, _} ->
+                    consume(Consumer, Listeners, [{Id, Input} | Inputs], InternalToken)
+            end
     end.
 
-%Applies the consume function and sends the output to the producer
-consume(ConsumeFun, ReducerPid) ->
+consume_setup(Consumer, InternalToken) ->
     receive
-        {input, ProducedItem} ->
-            ConsumerOutput = ConsumeFun(ProducedItem),
-            erlang:display({new_input_consumed, ProducedItem, ConsumerOutput}),
-            ReducerPid ! {consumer_output, ConsumerOutput}
+        {listeners_pids, Listeners} ->
+            consume(Consumer, Listeners, [], InternalToken)
     end.
 
 %Applies the reduction function until all elements are reduced.
 %When there are no more elements the output is sent to the OutputLoop process with the corresponding token
-reduce_loop(_, ReducedItem, 0, OutputLoopPid, Token) -> 
-    OutputLoopPid ! {reduced, Token, ReducedItem};
-reduce_loop(ReduceFun, AccVal, NumberOfItemsToReduce, OutputLoopPid, Token) ->
+reduce_loop(_, FullReduction, 0, _, OutputLoopPid, ExternalToken, _) -> 
+    OutputLoopPid ! {reduced, ExternalToken, FullReduction};
+reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopPid, ExternalToken, PartialParametersLists) ->
     receive
-        {consumer_output, Input} ->
-            ReducedVal = ReduceFun(AccVal, Input),
-            erlang:display({new_reduction, Input, ReducedVal}),
-            reduce_loop(ReduceFun, ReducedVal, NumberOfItemsToReduce - 1, OutputLoopPid, Token)
+        {output, Id, Input, InternalToken} ->
+            NewReductions = maps:put(InternalToken, [{Id, Input} | maps:get(InternalToken, [], PartialParametersLists)]),
+            PartialParametersList = maps:get(InternalToken, NewReductions),
+            if
+                length(PartialParametersList) == NumberOfSources ->
+                    ReducedVal = apply_fun(get_fun(Reducer), get_sources(Reducer), [AccVal | PartialParametersList]),
+                    erlang:display({new_reduction, Input, ReducedVal}),
+                    reduce_loop(Reducer, ReducedVal, NumberOfItemsToReduce - 1, OutputLoopPid, ExternalToken, PartialParametersLists);
+                true ->
+                    reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, OutputLoopPid, ExternalToken, PartialParametersList)
+            end
     end.
 
 %Receives a signal of a new element that got into the PCR, waits for the PCR output for that element and sends
@@ -206,5 +252,5 @@ identity_lambda() ->
     fun(X) -> X end.
 
 generate_fib_even_counter_pcr() ->
-    Reducer = #reducer{function=sum_lambda(), initial_val=0},
+    Reducer = #reducer{node_logic=sum_lambda(), initial_val=0},
     #pcr{producer=fib_lambda(), consumers=[even_lambda()], reducer=Reducer}.
