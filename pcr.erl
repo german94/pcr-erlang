@@ -134,7 +134,7 @@ spawn_pcr_node(Node, BasicFunctionApplier, ExternalListenerPids) ->
     end.
 
 get_producer_listeners(Pcr, Listeners) ->
-    [Listener || Listener <- Listeners, lists:is_member(get_producer_id(Pcr), get_listeners_of_id(get_node_id(Listener), Pcr))].
+    [Listener || Listener <- Listeners, lists:is_member(get_id(get_producer(Pcr)), get_listeners_of_id(get_node_id(Listener), Pcr))].
 
 send_message_to_node(Message, Node) ->
     get_node_pid(Node) ! Message.
@@ -196,9 +196,9 @@ reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopP
                 length(PartialParametersList) == NumberOfSources ->
                     ReducedVal = apply_fun(get_fun(Reducer), get_sources(Reducer), [AccVal | PartialParametersList]),
                     erlang:display({new_reduction, Input, ReducedVal}),
-                    reduce_loop(Reducer, ReducedVal, NumberOfItemsToReduce - 1, OutputLoopPid, ExternalToken, PartialParametersLists);
+                    reduce_loop(Reducer, ReducedVal, NumberOfItemsToReduce - 1, NumberOfSources, OutputLoopPid, ExternalToken, PartialParametersLists);
                 true ->
-                    reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, OutputLoopPid, ExternalToken, PartialParametersList)
+                    reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopPid, ExternalToken, PartialParametersList)
             end
     end.
 
