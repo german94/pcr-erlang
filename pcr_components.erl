@@ -1,4 +1,4 @@
--module(pcr_components_interface).
+-module(pcr_components).
 -record(consumer, {id, sources, node_logic}).
 -record(producer, {id, node_logic}).
 -record(reducer, {id, sources, node_logic, initial_val}).
@@ -13,7 +13,11 @@
     get_listeners_of_id/2,
     get_id/1,
     get_sources/1,
-    get_fun/1
+    get_fun/1,
+    create_producer/2,
+    create_consumer/3,
+    create_reducer/4,
+    create_pcr/3
 ]).
 
 get_reducer_initial_value(Pcr) ->
@@ -24,6 +28,18 @@ get_reducer_id(Node) ->
         is_record(Node, reducer) -> Node#reducer.id;
         true -> get_reducer_id(get_reducer(Node))
     end.
+
+create_consumer(Id, Sources, NodeLogic) ->
+    #consumer{id=Id, sources=Sources, node_logic=NodeLogic}.
+
+create_producer(Id, NodeLogic) ->
+    #producer{id=Id, node_logic=NodeLogic}.
+
+create_reducer(Id, Sources, NodeLogic, InitVal) ->
+    #reducer{id=Id, sources=Sources, node_logic=NodeLogic, initial_val=InitVal}.
+
+create_pcr(Producer, Consumers, Reducer) ->
+    #pcr{producer=Producer, consumers=Consumers, reducer=Reducer}.
 
 get_consumers(Pcr) ->
     Pcr#pcr.consumers.
