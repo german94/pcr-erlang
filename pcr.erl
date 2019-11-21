@@ -1,5 +1,27 @@
 -module(pcr).
 -export([start_pcr/2, pcr_sequential_composition/3]).
+-export([
+    apply_fun/3, 
+    production_loop/3, 
+    stop/1, 
+    notify_new_item/2, 
+    spawn_reducer/4,
+    spawn_pcr/3,
+    spawn_consumer/2,
+    spawn_pcr_node/3,
+    get_producer_listeners/2,
+    send_message_to_node/2,
+    broadcast_to_nodes/2,
+    send_receivers_data_to_nodes/2,
+    produce_new_value/3,
+    start_producer/4,
+    produce_new_set_of_values/3,
+    consume/4,
+    consume_setup/2,
+    reduce_loop/7,
+    output_loop/1,
+    wait_for_output/1,
+    generate_uuid/0]).
 
 apply_fun(Fun, [], Inputs) ->
     apply(Fun, Inputs);
