@@ -1,4 +1,5 @@
 -module(fibonacci_pcr).
+-export([generate_fib_even_counter_pcr/0]).
 
 %Functions to generate PCRs for testing
 even_lambda() ->
@@ -19,5 +20,7 @@ identity_lambda() ->
     fun(X) -> X end.
 
 generate_fib_even_counter_pcr() ->
-    Reducer = #reducer{node_logic=sum_lambda(), initial_val=0},
-    #pcr{producer=fib_lambda(), consumers=[even_lambda()], reducer=Reducer}.
+    Producer = pcr_components:create_producer(producer, fib_lambda()),
+    Consumer = pcr_components:create_consumer(even_filter, [producer], even_lambda()),
+    Reducer = pcr_components:create_reducer(sum, [even_filter], sum_lambda(), 0),
+    pcr_components:create_pcr(Producer, [Consumer], Reducer).
