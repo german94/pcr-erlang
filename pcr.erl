@@ -1,9 +1,9 @@
 -module(pcr).
--export([start_pcr/2, pcr_sequential_composition/3]).
+-export([start_pcr/2, pcr_sequential_composition/3, send_pcr_input/2]).
 -export([
     apply_fun/3, 
     production_loop/3, 
-    stop/1, 
+    stop_pcr/1, 
     notify_new_item/2, 
     spawn_reducer/4,
     spawn_pcr/3,
@@ -21,7 +21,8 @@
     reduce_loop/7,
     output_loop/1,
     wait_for_output/1,
-    generate_uuid/0]).
+    generate_uuid/0,
+    send_pcr_input/2]).
 
 apply_fun(Fun, [], Inputs) ->
     apply(Fun, Inputs);
@@ -54,11 +55,14 @@ production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
             produce_new_set_of_values(Pcr, Input, ReducerPid),
             production_loop(Pcr, OutputLoopPid, ExternalListenerPids);
         stop ->
-            stop(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
+            stop_pcr(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
     end.
 
-stop(OutputLoopPid) ->
+stop_pcr(OutputLoopPid) ->
     OutputLoopPid ! stop.
+
+send_pcr_input(Input, PcrPid) ->
+    PcrPid ! {input, Input}.
 
 notify_new_item(OutputLoopPid, Token) ->
     OutputLoopPid ! {new_item, Token}.
@@ -72,10 +76,10 @@ spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
             pcr_components:get_reducer(Pcr), 
             pcr_components:get_reducer_initial_value(Pcr),
             NumberOfItemsToReduce,
-            length(pcr_components:get_sources(Pcr)),
+            length(pcr_components:get_sources(pcr_components:get_reducer(Pcr))),
             OutputLoopPid,
             Token,
-            maps:empty()
+            maps:new()
         ]).
 
 %Spawns all the pcr nodes but the producer one
