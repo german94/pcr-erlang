@@ -1,4 +1,4 @@
--module(node_interface).
+-module(pcr_nodes).
 -record(active_node, {id, pid}).
 -export([create_node/2, get_node_id/1, get_node_pid/1]).
 
