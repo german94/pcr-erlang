@@ -1,5 +1,5 @@
 -module(pcr).
--export([start_pcr/2, pcr_sequential_composition/3, send_pcr_input/2]).
+-export([start_pcr/2, pcr_sequential_composition/3, send_input_to_pcr/2]).
 -export([
     apply_fun/3, 
     production_loop/3, 
@@ -21,8 +21,8 @@
     reduce_loop/7,
     output_loop/1,
     wait_for_output/1,
-    generate_uuid/0,
-    send_pcr_input/2]).
+    generate_uuid/0
+]).
 
 apply_fun(Fun, [], Inputs) ->
     apply(Fun, Inputs);
@@ -46,8 +46,10 @@ start_pcr(Pcr, ExternalListenerPids) ->
 %Listens for new PCR inputs and for each one it signals the OutputLoop process to wait for the new output,
 %spawns the reducer and produces the new set of values corresponding to the input
 production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
+    erlang:display('Waiting for inputs...'),
     receive
         {input, Input} ->
+            erlang:display('New input received'),
             Token = generate_uuid(),        %this token is used to match PCR inputs with PCR outputs
             notify_new_item(OutputLoopPid, Token),
             erlang:display({new_input, Input, Token}),
@@ -61,14 +63,12 @@ production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
 stop_pcr(OutputLoopPid) ->
     OutputLoopPid ! stop.
 
-send_pcr_input(Input, PcrPid) ->
-    PcrPid ! {input, Input}.
-
 notify_new_item(OutputLoopPid, Token) ->
     OutputLoopPid ! {new_item, Token}.
 
 %Spawns the reduce loop for a particular external input (identified by the token) and returns the PID
 spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
+    erlang:display('Spawning reducer'),
     spawn(
         pcr,
         reduce_loop, 
@@ -103,7 +103,9 @@ spawn_pcr_node(Node, BasicFunctionApplier, ExternalListenerPids) ->
     end.
 
 get_producer_listeners(Pcr, Listeners) ->
-    [Listener || Listener <- Listeners, lists:is_member(pcr_components:get_id(pcr_components:get_producer(Pcr)), pcr_components:get_listeners_of_id(pcr_nodes:get_node_id(Listener), Pcr))].
+    ProducerId = pcr_components:get_id(pcr_components:get_producer(Pcr)),
+    ProducerListenersIds = [pcr_components:get_id(Component) || Component <- pcr_components:get_listeners_of_id(ProducerId, Pcr)],
+    [Listener || Listener <- Listeners, lists:member(pcr_nodes:get_node_id(Listener), ProducerListenersIds)].
 
 send_message_to_node(Message, Node) ->
     pcr_nodes:get_node_pid(Node) ! Message.
@@ -131,34 +133,61 @@ start_producer(Pcr, Listeners, Input, InternalToken) ->
 
 %Iterates the produce function producing the values concurrently
 produce_new_set_of_values(Pcr, Input, ReducerPid) ->
+    erlang:display('Producing set of values'),
     lists:foreach(fun(Index) -> produce_new_value(Pcr, Index, ReducerPid) end, lists:seq(0, Input)).
 
 %Applies the consume function and sends the output to the producer
 consume(Consumer, Listeners, Inputs, InternalToken) ->
-    case length(Inputs) == pcr_components:get_sources(Consumer) of
-        true ->
-            ConsumerOutput = apply_fun(pcr_components:get_fun(Consumer), pcr_components:get_sources(Consumer), Inputs),
-            broadcast_to_nodes([{output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}], Listeners);
+    erlang:display({applying_fun_to, Inputs}),
+    ConsumerFunction = pcr_components:get_fun(Consumer),
+    ConsumerOutput = case pcr_components:is_producer(Consumer) of
+        true -> apply(ConsumerFunction, Inputs);
+        false -> apply_fun(ConsumerFunction, pcr_components:get_sources(Consumer), Inputs)
+    end,
+    erlang:display({broadcasting_output_to_listeners, ConsumerOutput, Listeners}),
+    broadcast_to_nodes([{output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}], Listeners).
+
+receive_producer_input() ->
+    receive
+        {input, Input} ->
+            Input
+    end.
+
+receive_consumer_inputs(Consumer, Inputs) ->
+    case length(Inputs) == length(pcr_components:get_sources(Consumer)) of
+        true -> Inputs;
         false -> 
             receive
                 {output, Id, Input, _} ->
-                    consume(Consumer, Listeners, [{Id, Input} | Inputs], InternalToken)
-            end
+                    receive_consumer_inputs(Consumer, [{Id, Input} | Inputs])
+                end
+    end.
+
+receive_listeners() ->
+    receive
+        {listeners_pids, Listeners} ->
+            erlang:display({consumer_received_listeners, Listeners}),
+            Listeners
     end.
 
 consume_setup(Consumer, InternalToken) ->
-    receive
-        {listeners_pids, Listeners} ->
-            consume(Consumer, Listeners, [], InternalToken)
-    end.
+    Listeners = receive_listeners(),
+    Inputs = case pcr_components:is_producer(Consumer) of
+        true -> [receive_producer_input()];
+        false -> receive_consumer_inputs(Consumer, [])
+    end,
+    consume(Consumer, Listeners, Inputs, InternalToken).
+    
 
 %Applies the reduction function until all elements are reduced.
 %When there are no more elements the output is sent to the OutputLoop process with the corresponding token
-reduce_loop(_, FullReduction, 0, _, OutputLoopPid, ExternalToken, _) -> 
+reduce_loop(_, FullReduction, 0, _, OutputLoopPid, ExternalToken, _) ->
+    erlang:display({reduced, ExternalToken, FullReduction}),
     OutputLoopPid ! {reduced, ExternalToken, FullReduction};
 reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopPid, ExternalToken, PartialParametersLists) ->
     receive
         {output, Id, Input, InternalToken} ->
+            erlang:display({reducing, Id, Input, InternalToken}),
             NewReductions = maps:put(InternalToken, [{Id, Input} | maps:get(InternalToken, [], PartialParametersLists)]),
             PartialParametersList = maps:get(InternalToken, NewReductions),
             if
@@ -174,11 +203,14 @@ reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopP
 %Receives a signal of a new element that got into the PCR, waits for the PCR output for that element and sends
 %it to all the external listeners
 output_loop(ExternalListenerPids) ->
+    erlang:display('output_loop started'),
     receive
         {new_item, Token} ->
+            erlang:display({new_item_notified, Token}),
             PcrOutput = wait_for_output(Token),
             erlang:display({sending_output_to_listeners, PcrOutput}),
             SendOutputFunction = fun(Pid) -> Pid ! {pcr_output, PcrOutput} end,
+            erlang:display({sending_output, PcrOutput, ExternalListenerPids}),
             lists:foreach(SendOutputFunction, ExternalListenerPids),
             output_loop(ExternalListenerPids);
         stop -> exit(0)
@@ -186,7 +218,7 @@ output_loop(ExternalListenerPids) ->
 
 %Waits (blocks) for a particular (token) PCR output
 wait_for_output(Token) ->
-    erlang:display("Waiting for token " ++ Token),
+    erlang:display({waiting_for_output, Token}),
     receive
         {reduced, Token, Item} ->
             erlang:display({token_received, Token, Item}),
@@ -198,5 +230,5 @@ generate_uuid() ->
     base64:encode(crypto:strong_rand_bytes(20)).
 
 %Encapsulates the message that is sent to the PCR with the input
-send_input_to_pcr(PcrPid, Input) ->
+send_input_to_pcr(Input, PcrPid) ->
     PcrPid ! {input, Input}.

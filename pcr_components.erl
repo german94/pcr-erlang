@@ -17,7 +17,10 @@
     create_producer/2,
     create_consumer/3,
     create_reducer/4,
-    create_pcr/3
+    create_pcr/3,
+    is_consumer/1,
+    is_producer/1,
+    is_reducer/1
 ]).
 
 get_reducer_initial_value(Pcr) ->
@@ -61,10 +64,20 @@ get_listeners_of_id(Id, Pcr) ->
         false -> ConsumersListeners
     end.
 
+is_producer(Component) when element(1, Component) == producer -> true;
+is_producer(_) -> false.
+
+is_consumer(Component) when element(1, Component) == consumer -> true;
+is_consumer(_) -> false.
+
+is_reducer(Component) when element(1, Component) == reducer -> true;
+is_reducer(_) -> false.
+
 get_id(Component) when element(1, Component) == consumer -> Component#consumer.id;
 get_id(Component) when element(1, Component) == producer -> Component#producer.id;
 get_id(Component) when element(1, Component) == reducer -> Component#reducer.id.
 
+get_sources(Component) when element(1, Component) == producer -> [];
 get_sources(Component) when element(1, Component) == consumer -> Component#consumer.sources;
 get_sources(Component) when element(1, Component) == reducer -> Component#reducer.sources.
 
