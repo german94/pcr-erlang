@@ -12,7 +12,7 @@
     get_producer_listeners/2,
     send_message_to_node/2,
     broadcast_to_nodes/2,
-    send_receivers_data_to_nodes/2,
+    send_each_node_its_listeners/2,
     produce_new_value/3,
     start_producer/4,
     produce_new_set_of_values/3,
@@ -68,8 +68,7 @@ notify_new_item(OutputLoopPid, Token) ->
 
 %Spawns the reduce loop for a particular external input (identified by the token) and returns the PID
 spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
-    erlang:display('Spawning reducer'),
-    spawn(
+    ReducerPid = spawn(
         pcr,
         reduce_loop, 
         [
@@ -80,7 +79,9 @@ spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
             OutputLoopPid,
             Token,
             maps:new()
-        ]).
+        ]),
+    erlang:display({reducer_spawned, ReducerPid}),
+    ReducerPid.
 
 %Spawns all the pcr nodes but the producer one
 spawn_pcr(Pcr, ReducerPid, InternalToken) ->
@@ -113,7 +114,7 @@ send_message_to_node(Message, Node) ->
 broadcast_to_nodes(Message, Nodes) ->
     lists:foreach(fun(Node) -> send_message_to_node(Message, Node) end, Nodes).
 
-send_receivers_data_to_nodes(Pcr, Listeners) ->
+send_each_node_its_listeners(Pcr, Listeners) ->
     lists:foreach(
         fun(Listener) -> send_message_to_node({listener_pids, pcr_components:get_listeners_of_id(pcr_nodes:get_node_id(Listener), Pcr)}, Listener) end,
         Listeners).
@@ -122,7 +123,7 @@ send_receivers_data_to_nodes(Pcr, Listeners) ->
 produce_new_value(Pcr, Input, ReducerPid) ->
     InternalToken = generate_uuid(),     %this token is used to identify produced items associated to a single PCR external input
     Listeners = spawn_pcr(Pcr, ReducerPid, InternalToken), 
-    send_receivers_data_to_nodes(Pcr, Listeners),  %sends a {listeners_pids, Listeners} message to each node so everyone knows who to send the output
+    send_each_node_its_listeners(Pcr, Listeners),  %sends a {listeners_pids, Listeners} message to each node so everyone knows who to send the output
     start_producer(Pcr, Listeners, Input, InternalToken).
 
 start_producer(Pcr, Listeners, Input, InternalToken) ->
@@ -145,7 +146,7 @@ consume(Consumer, Listeners, Inputs, InternalToken) ->
         false -> apply_fun(ConsumerFunction, pcr_components:get_sources(Consumer), Inputs)
     end,
     erlang:display({broadcasting_output_to_listeners, ConsumerOutput, Listeners}),
-    broadcast_to_nodes([{output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}], Listeners).
+    broadcast_to_nodes({output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}, Listeners).
 
 receive_producer_input() ->
     receive
