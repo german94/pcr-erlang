@@ -9,7 +9,6 @@
     get_consumers/1,
     get_producer/1,
     get_reducer/1,
-    get_consumers_of/2,
     get_listeners_of_id/2,
     get_id/1,
     get_sources/1,
@@ -53,16 +52,8 @@ get_producer(Pcr) ->
 get_reducer(Pcr) ->
     Pcr#pcr.reducer.
 
-get_consumers_of(Id, Pcr) ->
-    [Consumer || Consumer <- get_consumers(Pcr), lists:member(Id, get_sources(Consumer))].
-
 get_listeners_of_id(Id, Pcr) ->
-    ConsumersListeners = get_consumers_of(Id, Pcr),
-    Reducer = get_reducer(Pcr),
-    case lists:member(Id, get_sources(Reducer)) of
-        true -> [Reducer | ConsumersListeners];
-        false -> ConsumersListeners
-    end.
+    [Component || Component <- [get_reducer(Pcr)|get_consumers(Pcr)], lists:member(Id, get_sources(Component))].
 
 is_producer(Component) when element(1, Component) == producer -> true;
 is_producer(_) -> false.
