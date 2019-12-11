@@ -194,7 +194,11 @@ reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopP
     receive
         {output, Id, Input, InternalToken} ->
             erlang:display({reducing, Id, Input, InternalToken}),
-            NewReductions = maps:put(InternalToken, [{Id, Input} | maps:get(InternalToken, [], PartialParametersLists)]),
+            NewReductions = maps:put(
+                InternalToken,
+                [{Id, Input} | maps:get(InternalToken, PartialParametersLists, [])],
+                PartialParametersLists
+            ),
             PartialParametersList = maps:get(InternalToken, NewReductions),
             if
                 length(PartialParametersList) == NumberOfSources ->
