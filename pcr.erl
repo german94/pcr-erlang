@@ -1,18 +1,11 @@
 -module(pcr).
--export([start_pcr/2, pcr_sequential_composition/3, send_input_to_pcr/2]).
+-export([start_pcr/2, pcr_sequential_composition/3]).
 -export([
-    apply_fun/3, 
     production_loop/3, 
-    stop_pcr/1, 
-    notify_new_item/2, 
     spawn_reducer/4,
     spawn_pcr_nodes/3,
     spawn_consumer/2,
     spawn_pcr_node/3,
-    get_producer_listeners/2,
-    send_message_to_node/2,
-    broadcast_to_nodes/2,
-    send_each_node_its_listeners/2,
     produce_new_value/3,
     start_producer/4,
     produce_new_set_of_values/3,
@@ -20,15 +13,8 @@
     consume_setup/2,
     reduce_loop/7,
     output_loop/1,
-    wait_for_output/1,
-    generate_uuid/0
+    wait_for_output/1
 ]).
-
-apply_fun(Fun, [], Inputs) ->
-    apply(Fun, Inputs);
-apply_fun(Fun, [Source|Sources], Inputs) ->
-    InputOfSource = element(2, lists:keyfind(Source, 1, Inputs)),
-    apply_fun(Fun, Sources, [InputOfSource|lists:keydelete(Source, 1, Inputs)]).
 
 %External inputs get into Pcr1, then Pcr1 output becomes the input for PCR2
 %and finally the output of the whole composition is the output of Pcr2
@@ -50,21 +36,15 @@ production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
     receive
         {input, Input} ->
             erlang:display('New input received'),
-            Token = generate_uuid(),        %this token is used to match PCR inputs with PCR outputs
-            notify_new_item(OutputLoopPid, Token),
+            Token = pcr_utils:generate_uuid(),        %this token is used to match PCR inputs with PCR outputs
+            pcr_utils:notify_new_item(OutputLoopPid, Token),
             erlang:display({new_input, Input, Token}),
             ReducerPid = spawn_reducer(Pcr, Input + 1, OutputLoopPid, Token),
             produce_new_set_of_values(Pcr, Input, ReducerPid),
             production_loop(Pcr, OutputLoopPid, ExternalListenerPids);
         stop ->
-            stop_pcr(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
+            pcr_utils:stop_pcr(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
     end.
-
-stop_pcr(OutputLoopPid) ->
-    OutputLoopPid ! stop.
-
-notify_new_item(OutputLoopPid, Token) ->
-    OutputLoopPid ! {new_item, Token}.
 
 %Spawns the reduce loop for a particular external input (identified by the token) and returns the PID
 spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
@@ -103,37 +83,16 @@ spawn_pcr_node(Node, BasicFunctionApplier, ExternalListenerPids) ->
             start_pcr(Node, ExternalListenerPids)
     end.
 
-get_producer_listeners(Pcr, Listeners) ->
-    ProducerId = pcr_components:get_id(pcr_components:get_producer(Pcr)),
-    ProducerListenersIds = [pcr_components:get_id(Component) || Component <- pcr_components:get_listeners_of_id(ProducerId, Pcr)],
-    [Listener || Listener <- Listeners, lists:member(pcr_nodes:get_node_id(Listener), ProducerListenersIds)].
-
-send_message_to_node(Message, Node) ->
-    pcr_nodes:get_node_pid(Node) ! Message.
-
-broadcast_to_nodes(Message, Nodes) ->
-    lists:foreach(fun(Node) -> send_message_to_node(Message, Node) end, Nodes).
-
-send_each_node_its_listeners(Pcr, Listeners) ->
-    SendListenersToNode = fun(Node) -> 
-        NodeId = pcr_nodes:get_node_id(Node),
-        ListenersIds = [pcr_components:get_id(Listener) || Listener <- pcr_components:get_listeners_of_id(NodeId, Pcr)],
-        ListenersNodes = [Listener || Listener <- Listeners, lists:member(pcr_nodes:get_node_id(Listener), ListenersIds)],
-        erlang:display({sending_listeners_to_node, NodeId, ListenersNodes}),
-        send_message_to_node({listeners, ListenersNodes}, Node) 
-    end,
-    lists:foreach(SendListenersToNode, Listeners).
-
 %Spawns both producer and consumers and sends the producer the signal to generate the new value
 produce_new_value(Pcr, Input, ReducerPid) ->
-    InternalToken = generate_uuid(),     %this token is used to identify produced items associated to a single PCR external input
+    InternalToken = pcr_utils:generate_uuid(),     %this token is used to identify produced items associated to a single PCR external input
     Listeners = spawn_pcr_nodes(Pcr, ReducerPid, InternalToken), 
-    send_each_node_its_listeners(Pcr, Listeners),  %sends a {listeners, Listeners} message to each node so everyone knows who to send the output
+    pcr_utils:send_each_node_its_listeners(Pcr, Listeners),  %sends a {listeners, Listeners} message to each node so everyone knows who to send the output
     start_producer(Pcr, Listeners, Input, InternalToken).
 
 start_producer(Pcr, Listeners, Input, InternalToken) ->
     ProducerPid = spawn_consumer(pcr_components:get_producer(Pcr), InternalToken),
-    ProducerPid ! {listeners, get_producer_listeners(Pcr, Listeners)},
+    ProducerPid ! {listeners, pcr_utils:get_producer_listeners(Pcr, Listeners)},
     ProducerPid ! {input, Input},
     ProducerPid ! stop.
 
@@ -148,10 +107,10 @@ consume(Consumer, Listeners, Inputs, InternalToken) ->
     ConsumerFunction = pcr_components:get_fun(Consumer),
     ConsumerOutput = case pcr_components:is_producer(Consumer) of
         true -> apply(ConsumerFunction, Inputs);
-        false -> apply_fun(ConsumerFunction, pcr_components:get_sources(Consumer), Inputs)
+        false -> pcr:apply_fun(ConsumerFunction, pcr_components:get_sources(Consumer), Inputs)
     end,
     erlang:display({broadcasting_output_to_listeners, ConsumerOutput, Listeners}),
-    broadcast_to_nodes({output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}, Listeners).
+    pcr_utils:broadcast_to_nodes({output, pcr_components:get_id(Consumer), ConsumerOutput, InternalToken}, Listeners).
 
 receive_producer_input() ->
     receive
@@ -202,7 +161,7 @@ reduce_loop(Reducer, AccVal, NumberOfItemsToReduce, NumberOfSources, OutputLoopP
             PartialParametersList = maps:get(InternalToken, NewReductions),
             if
                 length(PartialParametersList) == NumberOfSources ->
-                    ReducedVal = apply_fun(pcr_components:get_fun(Reducer), pcr_components:get_sources(Reducer), [AccVal | PartialParametersList]),
+                    ReducedVal = pcr:apply_fun(pcr_components:get_fun(Reducer), pcr_components:get_sources(Reducer), [AccVal | PartialParametersList]),
                     erlang:display({new_reduction, Input, ReducedVal}),
                     reduce_loop(Reducer, ReducedVal, NumberOfItemsToReduce - 1, NumberOfSources, OutputLoopPid, ExternalToken, PartialParametersLists);
                 true ->
@@ -234,11 +193,3 @@ wait_for_output(Token) ->
             erlang:display({token_received, Token, Item}),
             Item
     end.
-
-%Generates a new token with a length of 20 characters
-generate_uuid() ->
-    base64:encode(crypto:strong_rand_bytes(20)).
-
-%Encapsulates the message that is sent to the PCR with the input
-send_input_to_pcr(Input, PcrPid) ->
-    PcrPid ! {input, Input}.
