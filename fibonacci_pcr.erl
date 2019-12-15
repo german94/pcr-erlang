@@ -24,4 +24,4 @@ generate_fib_even_counter_pcr() ->
     Consumer = pcr_components:create_consumer(even_filter, [producer], even_lambda()),
     Reducer = pcr_components:create_reducer(sum, [even_filter], sum_lambda(), 0),
     Pcr = pcr_components:create_pcr(Producer, [Consumer], Reducer),
-    pcr:start_pcr(Pcr, [self()]).
+    pcr_init:start_pcr(Pcr, [self()]).

@@ -7,8 +7,12 @@
     send_message_to_node/2,
     broadcast_to_nodes/2,
     send_each_node_its_listeners/2,
-    generate_uuid/0
+    generate_uuid/0,
+    send_input_to_pcr/2
 ]).
+
+send_input_to_pcr(Input, PcrPid) ->
+    PcrPid ! {input, Input}.
 
 apply_fun(Fun, [], Inputs) ->
     apply(Fun, Inputs);
@@ -46,3 +50,9 @@ send_each_node_its_listeners(Pcr, Listeners) ->
 %Generates a new token with a length of 20 characters
 generate_uuid() ->
     base64:encode(crypto:strong_rand_bytes(20)).
+
+%External inputs get into Pcr1, then Pcr1 output becomes the input for PCR2
+%and finally the output of the whole composition is the output of Pcr2
+pcr_sequential_composition(Pcr1, Pcr2, ExternalListenerPids) ->
+    Pcr2Pid = pcr_utils:start_pcr(Pcr2, ExternalListenerPids),
+    pcr_utils:start_pcr(Pcr1, [Pcr2Pid]).
