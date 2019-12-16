@@ -45,7 +45,7 @@ spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
 %Iterates the produce function producing the values concurrently
 produce_new_set_of_values(Pcr, Input, ReducerPid) ->
     erlang:display('Producing set of values'),
-    lists:foreach(fun(Index) -> produce_new_value(Pcr, Index, ReducerPid) end, lists:seq(0, Input)).
+    [produce_new_value(Pcr, Index, ReducerPid) || Index <- lists:seq(0, Input)].
 
 %Spawns both producer and consumers and sends the producer the signal to generate the new value
 produce_new_value(Pcr, Input, ReducerPid) ->
