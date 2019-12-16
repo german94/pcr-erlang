@@ -25,27 +25,20 @@ production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
             pcr_utils:stop_pcr(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
     end.
 
-%Spawns the reduce loop for a particular external input (identified by the token) and returns the PID
+%Spawns the reduction process for a particular external input (identified by the token) and returns the PID
 spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
     ReducerPid = spawn(
         pcr_reduce,
-        reduce_loop, 
-        [
-            pcr_components:get_reducer(Pcr), 
-            pcr_components:get_reducer_initial_value(Pcr),
-            NumberOfItemsToReduce,
-            length(pcr_components:get_sources(pcr_components:get_reducer(Pcr))),
-            OutputLoopPid,
-            Token,
-            maps:new()
-        ]),
+        reduce, 
+        [Pcr, NumberOfItemsToReduce, OutputLoopPid, Token]
+    ),
     erlang:display({reducer_spawned, ReducerPid}),
     ReducerPid.
 
 %Iterates the produce function producing the values concurrently
 produce_new_set_of_values(Pcr, Input, ReducerPid) ->
     erlang:display('Producing set of values'),
-    lists:foreach(fun(Index) -> produce_new_value(Pcr, Index, ReducerPid) end, lists:seq(0, Input)).
+    [produce_new_value(Pcr, Index, ReducerPid) || Index <- lists:seq(0, Input)].
 
 %Spawns both producer and consumers and sends the producer the signal to generate the new value
 produce_new_value(Pcr, Input, ReducerPid) ->

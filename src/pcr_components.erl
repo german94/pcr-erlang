@@ -22,8 +22,8 @@
     is_reducer/1
 ]).
 
-get_reducer_initial_value(Pcr) ->
-    Pcr#pcr.reducer#reducer.initial_val.
+get_reducer_initial_value(Reducer) ->
+    Reducer#reducer.initial_val.
 
 get_reducer_id(Node) ->
     if
