@@ -27,9 +27,11 @@ These are represented by records and can be found [here](https://github.com/germ
   * _**listener**_: this concept has not a type associated, but it's implicitly used in many parts. Basically if we have two components `A` and `B` that are part of the same PCR, `A` is a listener of `B` if `id(B)` is an element of `sources(A)`.
   
  ### Tokens
-We use two kind of tokens, both of them generated using [this](https://github.com/german94/pcr-erlang/blob/master/src/pcr_utils.erl#L51) function
+We use two kind of tokens, both of them generated using [this](https://github.com/german94/pcr-erlang/blob/master/src/pcr_utils.erl#L51) function and to serve different purposes.
  #### External token
+ This kind of token is associated to a particular input that goes into the PCR. We need this in order to allow concurrent input processing while respecting the order of the ouputs. This could be bad in the sense that if we have two inputs _A_ and _B_ that were sent to the PCR and all the processing related to _B_ has finished but it's still working on _A_, _B's_ output will not be returned until _A_ finishes. We need to decide if the order is important or we can just return what we have as soon as we have it, tagging it with the input to set the association.
  #### Internal token
+ Internal tokens are used to identify a particular value that will be processed by multiple components. For example, a reducer would need to process several values and each value will also come from several sources, so to associate each value with the outputs from more than once sources, we use an internal token.
  
  ### Behavior
  
@@ -49,3 +51,4 @@ The reduce logic can be found [here](https://github.com/german94/pcr-erlang/blob
 The reduce_loop function takes this reduction and updates it (creating a new one) every time it receives an input from one of the sources. The loop checks if all the sources have sent their inputs and if that's the case, it will perform the reduction as it has all the needed information and send the processed item to the output. If there's some source that have not sent it's proessed input yet, then the reducer will block in the receive statement, waiting for that data.
 
 #### Output handler
+The output handler logic is responsible of making that the PCR outputs return in the same order that the corresponding inputs. When a new input comes to the PCR, an external token is generated and the output handler process blocks in the receive statement, waiting for the PCR output associated to that external token (it performs a _selective receive_).
