@@ -15,7 +15,6 @@ PCR pattern implementation in Erlang programming language
 ### Objective
 The idea of this project is to implement a way to write PCRs taking advantage of the way Erlang manages concurrency. Erlang allows us to create as many processes as we need, to manage every concurrent activity. A concurrenct activity is not the same as a concurrent task. For example, in this project we have tasks such as producing, consuming and reducing items, but a real concurrent activity would be processing a specific item (i.e. applying some of those tasks to a particular item). This is an important idea that will be applied many times in this project.
 
-## Concepts
 ### Components
 These are represented by records and can be found [here](https://github.com/german94/pcr-erlang/blob/master/src/pcr_components.erl) and [here](https://github.com/german94/pcr-erlang/blob/master/src/pcr_nodes.erl). They have data associated such as an ID and some helper functions such as getters (like get_id/1 and constructors like create_pcr/3).
 
