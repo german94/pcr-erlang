@@ -23,7 +23,11 @@ These are represented by records and can be found [here](https://github.com/germ
   * _**reducer**_: has an ID, a list of sources, a node_logic and an initial value.
   * _**pcr**_: has a producer, a list of consumers and a reducer. The producer and the consumers may be nested PCRs, however this kind of composition has not been implemented yet.
   * _**active_node**_: has an ID that matches to a PCR's component (which can be one of the above mentioned) and the pid of the process running its node_logic. It represents a _living_ component.
-  * _**listener**_: this concept has not a type associated, but it's implicitly used in many parts. Basically if we have two components `A` and `B` that are part of the same PCR, `A` is a listener of `B` if `id(B)` is an element of `sources(A)`.
+  
+ ### Concepts
+ 
+ * _**listener**_: this concept has not a type associated, but it's implicitly used in many parts. Basically if we have two components `A` and `B` that are part of the same PCR, `A` is a listener of `B` if `id(B)` is an element of `sources(A)`.
+ * _**external listener**_: is the PID of a process that will receive the outputs of the PCR. A list of external listeners is specified when the PCR is created.
   
  ### Tokens
 We use two kind of tokens, both of them generated using [this](https://github.com/german94/pcr-erlang/blob/master/src/pcr_utils.erl#L51) function and to serve different purposes.
@@ -50,4 +54,12 @@ The reduce logic can be found [here](https://github.com/german94/pcr-erlang/blob
 The reduce_loop function takes this reduction and updates it (creating a new one) every time it receives an input from one of the sources. The loop checks if all the sources have sent their inputs and if that's the case, it will perform the reduction as it has all the needed information and send the processed item to the output. If there's some source that have not sent it's proessed input yet, then the reducer will block in the receive statement, waiting for that data.
 
 #### Output handler
-The output handler logic is responsible of making that the PCR outputs return in the same order that the corresponding inputs. When a new input comes to the PCR, an external token is generated and the output handler process blocks in the receive statement, waiting for the PCR output associated to that external token (it performs a _selective receive_).
+The output handler logic is responsible of making that the PCR outputs return in the same order that the corresponding inputs. The implementation can be found [here](https://github.com/german94/pcr-erlang/blob/master/src/pcr_output_handler.erl) When a new input comes to the PCR, an external token is generated and the output handler process blocks in the receive statement, waiting for the output associated to that external token (it performs a _selective receive_). When it receives this output, it sends it to all the _external listeners_ that were registered when the PCR was created.
+
+#### Production loop
+The production loop is responsible of receiving the inputs from the outside and triggering the corresponding processes that will lead to a new PCR output, related to that specific input. The implementation can be found [here](https://github.com/german94/pcr-erlang/blob/master/src/pcr_init.erl#L13). When it receives a new input, it performs the following steps:
+1. Creates an external
+2. Notifies the output handler that a new input was received
+3. Spawns a reducer that will work with the values in the range from 0 to the input
+4. Produces the items iterating the range in a concurrent way, starting a new producer process for each value
+
