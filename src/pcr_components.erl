@@ -2,7 +2,7 @@
 -record(consumer, {id, sources, node_logic}).
 -record(producer, {id, node_logic}).
 -record(reducer, {id, sources, node_logic, initial_val}).
--record(pcr, {producer, consumers, reducer}).
+-record(pcr, {id=main_pcr, producer, consumers, reducer}).
 -export([
     get_reducer_initial_value/1, 
     get_reducer_id/1,
@@ -55,6 +55,9 @@ get_reducer(Pcr) ->
 get_listeners_of_id(Id, Pcr) ->
     [Component || Component <- [get_reducer(Pcr)|get_consumers(Pcr)], lists:member(Id, get_sources(Component))].
 
+is_pcr(Component) when element(1, Component) == pcr -> true;
+is_pcr(_) -> false.
+
 is_producer(Component) when element(1, Component) == producer -> true;
 is_producer(_) -> false.
 
@@ -64,6 +67,7 @@ is_consumer(_) -> false.
 is_reducer(Component) when element(1, Component) == reducer -> true;
 is_reducer(_) -> false.
 
+get_id(Component) when element(1, Component) == pcr -> Component#pcr.id;
 get_id(Component) when element(1, Component) == consumer -> Component#consumer.id;
 get_id(Component) when element(1, Component) == producer -> Component#producer.id;
 get_id(Component) when element(1, Component) == reducer -> Component#reducer.id.
@@ -75,3 +79,6 @@ get_sources(Component) when element(1, Component) == reducer -> Component#reduce
 get_fun(Component) when element(1, Component) == consumer -> Component#consumer.node_logic;
 get_fun(Component) when element(1, Component) == producer -> Component#producer.node_logic;
 get_fun(Component) when element(1, Component) == reducer -> Component#reducer.node_logic.
+
+get_pcr(Component) when element(1, Component) == consumer -> Component#consumer.node_logic.
+

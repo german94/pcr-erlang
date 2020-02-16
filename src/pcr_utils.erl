@@ -20,8 +20,11 @@ apply_fun(Fun, [Source|Sources], Inputs) ->
     InputOfSource = element(2, lists:keyfind(Source, 1, Inputs)),
     apply_fun(Fun, Sources, [InputOfSource|lists:keydelete(Source, 1, Inputs)]).
 
-stop_pcr(OutputLoopPid) ->
-    OutputLoopPid ! stop.
+stop_pcr(PcrPid) ->
+    PcrPid ! stop.
+
+stop_output_handler(OutputHandlerPid) ->
+    OutputHandlerPid ! stop.
 
 notify_new_item(OutputLoopPid, Token) ->
     OutputLoopPid ! {new_item, Token}.

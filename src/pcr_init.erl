@@ -22,7 +22,8 @@ production_loop(Pcr, OutputLoopPid, ExternalListenerPids) ->
             produce_new_set_of_values(Pcr, Input, ReducerPid),
             production_loop(Pcr, OutputLoopPid, ExternalListenerPids);
         stop ->
-            pcr_utils:stop_pcr(OutputLoopPid)        %here we should kill all the other PCR processes: they should be linked to the one that runs this function
+            %here we should kill all the other PCR processes that are waiting inputs
+            pcr_utils:stop_output_handler(OutputLoopPid)        
     end.
 
 %Spawns the reduction process for a particular external input (identified by the token) and returns the PID
