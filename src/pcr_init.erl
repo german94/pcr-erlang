@@ -37,15 +37,19 @@ spawn_reducer(Pcr, NumberOfItemsToReduce, OutputLoopPid, Token) ->
     ReducerPid.
 
 %Iterates the produce function producing the values concurrently
-produce_new_set_of_values(Pcr, Input, ReducerPid) ->
+produce_new_set_of_values(Pcr, PcrInput, ReducerPid) ->
     erlang:display('Producing set of values'),
-    [produce_new_value(Pcr, Index, ReducerPid) || Index <- lists:seq(0, Input)].
+    [produce_new_value(Pcr, Index, PcrInput, ReducerPid) || Index <- lists:seq(0, PcrInput)].
 
-%Spawns both producer and consumers and sends the producer the signal to generate the new value
-produce_new_value(Pcr, Input, ReducerPid) ->
+%Spawns both producer and consumers
+%Sends the producer the signal to generate the new value
+%Sends to the pcr_input consumer the original input that came into the PCR (PcrInput)
+produce_new_value(Pcr, Input, PcrInput, ReducerPid) ->
     InternalToken = pcr_utils:generate_uuid(),     %this token is used to identify produced items associated to a single PCR external input
-    Listeners = spawn_pcr_nodes(Pcr, ReducerPid, InternalToken), 
+    PcrInputConsumerNode = spawn_pcr_input_consumer(InternalToken),
+    Listeners = [PcrInputConsumerNode | spawn_pcr_nodes(Pcr, ReducerPid, InternalToken)],
     pcr_utils:send_each_node_its_listeners(Pcr, Listeners),  %sends a {listeners, Listeners} message to each node so everyone knows who to send the output
+    pcr_utils:send_message_to_node({input, PcrInput}, PcrInputConsumerNode),
     start_producer(Pcr, Listeners, Input, InternalToken).
 
 %Spawns all the pcr nodes but the producer one
@@ -53,6 +57,11 @@ spawn_pcr_nodes(Pcr, ReducerPid, InternalToken) ->
     Consumers = [pcr_nodes:create_node(pcr_components:get_id(Consumer), spawn_consumer(Consumer, InternalToken)) || Consumer <- pcr_components:get_consumers(Pcr)],
     Reducer = pcr_nodes:create_node(pcr_components:get_reducer_id(Pcr), ReducerPid),
     [Reducer | Consumers].
+
+spawn_pcr_input_consumer(InternalToken) ->
+    ConsumerId = pcr_input,
+    Consumer = pcr_components:create_consumer(ConsumerId, [], fun(X) -> X end),
+    pcr_nodes:create_node(ConsumerId, spawn_consumer(Consumer, InternalToken)).
 
 start_producer(Pcr, Listeners, Input, InternalToken) ->
     ProducerPid = spawn_consumer(pcr_components:get_producer(Pcr), InternalToken),
